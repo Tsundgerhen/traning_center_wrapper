@@ -1,0 +1,24 @@
+# Workspace wrapper repo — tracks only the shared setup around the apps.
+# Each app (lms-erp, lms-erp-tenant, lms-erp-admin, bilig_user_web) is its own
+# git repo and must never be committed here.
+#
+# Whitelist: ignore everything at the root, then re-include the setup files.
+# A new app folder dropped in later is ignored automatically; a new root-level
+# setup file must be added below with a `!` line.
+/*
+
+!/.gitignore
+!/.gitattributes
+!/.claude/
+!/AGENTS.md
+!/CLAUDE.md
+!/Makefile
+!/README.md
+
+# Machine-local Claude Code state
+/.claude/settings.local.json
+/.claude/scheduled_tasks.lock
+
+# Secrets, should one ever land in the setup files
+.env
+.env.*

@@ -1,0 +1,2 @@
+# Keep LF on every OS — CRLF breaks Makefile recipes and shell snippets.
+* text=auto eol=lf
