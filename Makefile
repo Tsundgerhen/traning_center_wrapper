@@ -7,10 +7,14 @@
 #    make tenant    lms-erp-tenant   center staff web        :3000
 #    make admin     lms-erp-admin    Bilig staff web         :3002
 #    make user      bilig_user_web   student & parent web    :3001
+#    make landing   bilig-landing    public marketing site   :3004
 #
 #    make dev       backend + tenant          (the usual day)
-#    make dev-all   backend + all three webs
+#    make dev-all   backend + all four webs
 #    make stop      free every dev port (postgres is left running)
+#
+#  bilig-landing calls production for pricing unless its .env.local sets
+#  BACKEND_URL=http://localhost:3003 -- see AGENTS.md.
 #
 #  Requires GNU make, Node, yarn, npm and Git Bash on PATH.
 #  Run `make` or `make help` for the full list.
@@ -25,9 +29,13 @@ BACKEND_DIR := lms-erp
 TENANT_DIR  := lms-erp-tenant
 ADMIN_DIR   := lms-erp-admin
 USER_DIR    := bilig_user_web
+LANDING_DIR := bilig-landing
 
 DEV_PG_PORT ?= 5433
 DEV_PG_DB   ?= school_mgmt
+# scripts/dev-db.mjs reads these from the environment; without the export it
+# falls back to its own defaults and can start on a port PG_PING never checks
+export DEV_PG_PORT DEV_PG_DB
 
 # Ports the dev processes listen on -- what the `stop-*` targets clear before
 # a restart. Sources of truth: $(BACKEND_DIR)/.env PORT,
@@ -38,6 +46,7 @@ TENANT_PORT ?= 3000
 USER_PORT   ?= 3001
 ADMIN_PORT  ?= 3002
 API_PORT    ?= 3003
+LANDING_PORT ?= 3004
 STUDIO_PORT ?= 5555
 
 # Script `make api` runs. `make dev API_START=start:dev` for nest watch mode.
@@ -72,14 +81,15 @@ dev: stop-tenant stop-api stop-studio ## backend + tenant web (the usual day)
 	  "$(MAKE) wait-db && $(MAKE) api" \
 	  "$(MAKE) tenant"
 
-dev-all: stop ## backend + tenant + admin + user webs
-	$(CONC) -n db,studio,api,tenant,admin,user -c blue,magenta,green,cyan,yellow,red --kill-others \
+dev-all: stop ## backend + tenant + admin + user + landing webs
+	$(CONC) -n db,studio,api,tenant,admin,user,landing -c blue,magenta,green,cyan,yellow,red,white --kill-others \
 	  "$(MAKE) db" \
 	  "$(MAKE) wait-db && $(MAKE) studio" \
 	  "$(MAKE) wait-db && $(MAKE) api" \
 	  "$(MAKE) tenant" \
 	  "$(MAKE) admin" \
-	  "$(MAKE) user"
+	  "$(MAKE) user" \
+	  "$(MAKE) landing"
 
 backend: stop-api stop-studio ## backend only: db + prisma studio + API
 	$(CONC) -n db,studio,api -c blue,magenta,green --kill-others \
@@ -96,6 +106,9 @@ admin: stop-admin ## admin web, Bilig staff         http://localhost:3002
 
 user: stop-user ## user web, students/parents     http://localhost:3001
 	cd $(USER_DIR) && npm run dev -- -p $(USER_PORT)
+
+landing: stop-landing ## landing site, public marketing http://localhost:3004
+	cd $(LANDING_DIR) && npm run dev -- -p $(LANDING_PORT)
 
 api: stop-api ## backend API, db must be up     http://localhost:3003
 	cd $(BACKEND_DIR) && yarn $(API_START)
@@ -130,7 +143,7 @@ wait-db:
 	echo "[wait-db] timed out after 90s on :$(DEV_PG_PORT)"; exit 1
 
 ## stop - frees a port held by a leftover dev process
-stop: stop-tenant stop-admin stop-user stop-api stop-studio ## stop every app (postgres keeps running, see db-stop)
+stop: stop-tenant stop-admin stop-user stop-landing stop-api stop-studio ## stop every app (postgres keeps running, see db-stop)
 
 stop-tenant: ## stop the tenant web   :3000
 	$(call kill_port,$(TENANT_PORT),tenant)
@@ -140,6 +153,9 @@ stop-admin: ## stop the admin web    :3002
 
 stop-user: ## stop the user web     :3001
 	$(call kill_port,$(USER_PORT),user)
+
+stop-landing: ## stop the landing site :3004
+	$(call kill_port,$(LANDING_PORT),landing)
 
 stop-api: ## stop the backend API  :3003
 	$(call kill_port,$(API_PORT),api)
@@ -176,27 +192,30 @@ db-stop: ## stop the embedded postgres, if one is running
 	  echo "==> nothing to stop"; \
 	fi
 
-## all four apps
+## all five apps
 install: ## install dependencies
 	cd $(BACKEND_DIR) && yarn install
 	cd $(TENANT_DIR) && npm install
 	cd $(ADMIN_DIR) && npm install
 	cd $(USER_DIR) && npm install
+	cd $(LANDING_DIR) && npm install
 
 build: ## production build
 	cd $(BACKEND_DIR) && yarn build
 	cd $(TENANT_DIR) && npm run build
 	cd $(ADMIN_DIR) && npm run build
 	cd $(USER_DIR) && npm run build
+	cd $(LANDING_DIR) && npm run build
 
 lint: ## lint
 	cd $(BACKEND_DIR) && yarn lint
 	cd $(TENANT_DIR) && npm run lint
 	cd $(ADMIN_DIR) && npm run lint
 	cd $(USER_DIR) && npm run lint
+	cd $(LANDING_DIR) && npm run lint
 
 clean: ## remove build output (keeps node_modules and .pgdata)
-	rm -rf "$(BACKEND_DIR)/dist" "$(TENANT_DIR)/.next" "$(ADMIN_DIR)/.next" "$(USER_DIR)/.next"
+	rm -rf "$(BACKEND_DIR)/dist" "$(TENANT_DIR)/.next" "$(ADMIN_DIR)/.next" "$(USER_DIR)/.next" "$(LANDING_DIR)/.next"
 
 help: ## show this help
 	@printf '\nUsage: \033[36mmake <target>\033[0m   e.g. make dev, make tenant, make db-migrate NAME=add_foo\n'
@@ -263,8 +282,8 @@ with-db:
 	fi; \
 	exit $$rc
 
-.PHONY: dev dev-all backend tenant admin user api db studio wait-db \
-        stop stop-tenant stop-admin stop-user stop-api stop-studio \
+.PHONY: dev dev-all backend tenant admin user landing api db studio wait-db \
+        stop stop-tenant stop-admin stop-user stop-landing stop-api stop-studio \
         front back stop-web stop-all \
         db-reset db-nuke db-migrate db-deploy db-seed db-generate db-stop \
         install build lint clean help with-db

@@ -1,13 +1,14 @@
-# training_center — Bilig LMS ERP (one backend, three web clients)
+# training_center — Bilig LMS ERP (one backend, three app webs, one landing site)
 
-One workspace, **four independent applications, each with its own git repo**:
+One workspace, **five independent applications, each with its own git repo**:
 
 | Path              | App                        | Realm → routes               | Stack                                   | Pkg mgr    |
 | ----------------- | -------------------------- | ---------------------------- | --------------------------------------- | ---------- |
-| `lms-erp/`        | Backend API                | serves all three             | NestJS 11 · Prisma 7 · PostgreSQL       | **yarn 4** |
+| `lms-erp/`        | Backend API                | serves all four              | NestJS 11 · Prisma 7 · PostgreSQL       | **yarn 4** |
 | `lms-erp-tenant/` | Tenant web (center staff)  | `employee` → `/v1/company/*` | Next.js 16 · next-intl · shadcn         | **npm**    |
 | `lms-erp-admin/`  | Admin web (Bilig staff)    | `admin` → `/v1/admin/*`      | Next.js 16 · shadcn · Vitest/Playwright | **npm**    |
 | `bilig_user_web/` | Student & parent web       | `user` → `/v1/user/*`        | Next.js 16 · OpenAPI-generated zod      | **npm**    |
+| `bilig-landing/`  | Public marketing site      | none → `/v1/public/*`        | Next.js 16 · Tailwind v4 (no UI kit)    | **npm**    |
 
 The workspace root is a **separate wrapper git repo** with no `package.json`. It holds this
 file, the `.claude/` rules, and a `Makefile` that orchestrates the apps, and it tracks
@@ -18,11 +19,12 @@ file, the `.claude/` rules, and a `Makefile` that orchestrates the apps, and it 
 Product: multi-tenant SaaS for training centers in Mongolia — organization, branches,
 classes, students, attendance, assessment, billing (QPay + eBarimt), reports. Bilig's own
 staff run plans/subscriptions/invoices for tenants from the admin web; students and parents
-use the user web (the browser form of the `bilig_mobile` Flutter app).
+use the user web (the browser form of the `bilig_mobile` Flutter app). Prospective customers
+land on the marketing site (`bilig.systems`), whose CTAs hand off to the tenant web.
 
 ## Which app am I in?
 
-Decide before writing code — the four apps have different, sometimes opposite, rules.
+Decide before writing code — the five apps have different, sometimes opposite, rules.
 
 - Touching data, schema, permissions, money math, cron, tokens → **backend** (`lms-erp/`).
 - Screens for tenant staff (branches, classes, students, attendance, billing) →
@@ -31,8 +33,10 @@ Decide before writing code — the four apps have different, sometimes opposite,
   `lms-erp-admin/`.
 - Screens for students or parents (tasks, grades, attendance, schedule, pay, inbox) →
   `bilig_user_web/`.
+- Anonymous visitors (marketing copy, the public price list, SEO/metadata) →
+  `bilig-landing/`.
 - "Add an endpoint" almost always means **backend + one client**. Pick the surface by who
-  calls it (`company/`, `admin/`, `user/`), build the controller + core service first, then
+  calls it (`company/`, `admin/`, `user/`, or `public/` for anonymous), build the controller + core service first, then
   the client — every client's mapper/schema is written against the real wire shape, not a
   guess.
 
@@ -47,6 +51,9 @@ Each app keeps its own detailed docs; read them before editing that app:
 - `bilig_user_web/README.md` — the user web's layout, mobile→web decisions, design tokens.
   Its "UI only / fixture data" framing is **stale**: the app is wired to the real API now
   (`src/lib/api/`), and `src/lib/data*.ts` no longer exists. Trust the code.
+- `bilig-landing/README.md` — the landing site's structure, theming and deploy pipeline.
+  Its "no backend calls" line under Deployment is **stale**: pricing comes live from the
+  API through `app/api/plans/route.ts`. Trust the code.
 
 Every frontend's `AGENTS.md` starts with a `<!-- BEGIN:nextjs-agent-rules -->` block
 written by `next dev` — leave it alone. It means what it says: this Next.js version differs
@@ -60,20 +67,21 @@ ports first. `make help` lists everything.
 
 ```bash
 make dev          # backend + tenant web, one terminal, Ctrl+C kills all
-make dev-all      # backend + tenant + admin + user webs
+make dev-all      # backend + tenant + admin + user + landing webs
 make backend      # db + prisma studio + API only
 make tenant       # tenant web only  |  make admin  # admin web  |  make user  # user web
+make landing      # landing site only
 make stop         # free every dev port (postgres keeps running; make db-stop ends it)
 make db-migrate NAME=add_foo   # prisma migrate dev, with a guaranteed-live db
 make db-reset                  # drop → migrate deploy → generate → seed
-make install / build / lint    # all four apps
+make install / build / lint    # all five apps
 ```
 
 Ports (dev): tenant web **3000**, user web **3001**, admin web **3002**, API **3003**,
-prisma studio **5555**, dev Postgres **5433**. `next dev` defaults to 3000, so the admin
-and user webs must be started with `-p` (the Makefile does this).
+landing **3004**, prisma studio **5555**, dev Postgres **5433**. `next dev` defaults to
+3000, so the admin, user and landing webs must be started with `-p` (the Makefile does this).
 
-How each client reaches the backend — all three are server-side (BFF), the browser never
+How each client reaches the backend — all of them server-side (BFF), the browser never
 sees a token or the API address:
 
 | App               | Env var           | Value shape                        | Transport for client-side writes          |
@@ -81,6 +89,12 @@ sees a token or the API address:
 | `lms-erp-tenant/` | `BACKEND_API_URL` | no `/v1` (added by `serverGet`)    | `/api/[...path]` proxy                    |
 | `lms-erp-admin/`  | `BACKEND_API_URL` | no `/v1` (added by `serverGet`)    | `/api/[...path]` proxy                    |
 | `bilig_user_web/` | `API_BASE_URL`    | **includes** `/v1`, no trailing `/` | Server Actions (no route handlers at all) |
+| `bilig-landing/`  | `BACKEND_URL`     | no `/v1`; **defaults to production** | `/api/plans` + `/api/plan-inquiry` handlers; contact form posts to `/v1/public/leads` from the browser |
+
+**The landing site falls back to `https://api.bilig.systems` when `BACKEND_URL` is unset**,
+so a local `make landing` shows production prices, not your seed. Set
+`BACKEND_URL=http://localhost:3003` (and `TENANT_URL=http://localhost:3000`, else the CTAs
+are inert `#` links) in `bilig-landing/.env.local` to work against the local stack.
 
 **Chat is the one exception.** A WebSocket cannot go through a BFF proxy or a Server
 Action, so the tenant and user webs pass `CHAT_SOCKET_URL` (the API's public origin) to the
@@ -104,6 +118,7 @@ cd lms-erp-tenant && npm run dev | lint | typecheck | format | build
 cd lms-erp-admin  && npm run dev -- -p 3002 | lint | build | test | test:e2e
 cd bilig_user_web && npm run dev -- -p 3001 | lint | typecheck | build
                   && npm run check:i18n | check:forms | check:icons | api:types | verify:contract
+cd bilig-landing  && npm run dev -- -p 3004 | lint | typecheck | build
 ```
 
 Test runners differ per app — do not assume one app's setup in another:
@@ -118,10 +133,13 @@ Test runners differ per app — do not assume one app's setup in another:
 - `bilig_user_web/` — no unit runner; its guard rails are `typecheck` plus the `check:*`
   scripts and `verify:contract` (parses live API responses against the generated schemas).
   Run the `check:*` scripts relevant to your change; don't propose a test framework unprompted.
+- `bilig-landing/` — no test runner; `lint` + `typecheck` are the whole gate (the same two
+  its deploy workflow runs). Don't propose a test framework unprompted.
 
 `.env` files are secrets and are deny-listed (`.env.example` is caught by the same rule —
 ask the user if you need a variable's name). Each app validates its env at boot; do not add
-defaults to "fix" a startup error.
+defaults to "fix" a startup error. (The landing site is the exception: it has no env
+validation and its two vars carry deliberate fallbacks — see `bilig-landing/lib/env.ts`.)
 
 ---
 
@@ -132,18 +150,24 @@ NestJS 11, Prisma 7 with a driver adapter, PostgreSQL, Joi-validated env, URI ve
 that is intentional, do not add defaults to `src/config/env.validation.ts` to "fix" a
 startup error.
 
-## Three realms, three surfaces
+## Three realms, four surfaces
 
 | Surface       | Routes          | Swagger        | Token realm | Who                |
 | ------------- | --------------- | -------------- | ----------- | ------------------ |
 | `src/admin/`  | `/v1/admin/*`   | `/docs/admin`  | `admin`     | platform staff     |
 | `src/company/`| `/v1/company/*` | `/docs/company`| `employee`  | tenant staff       |
 | `src/user/`   | `/v1/user/*`    | `/docs/user`   | `user`      | students & parents |
+| `src/public/` | `/v1/public/*`  | `/docs/public` | none        | anonymous visitors |
 
 Separate JWT secrets **and** `aud` claims per realm: a token from one realm is always a 401
 on another. Each surface folder has a `*-surface.module.ts` aggregator that `AppModule`
 imports and Swagger uses as its include-filter — a new feature module must be added there
 or it exists in neither.
+
+`public/` is the only surface with no realm: its controllers are `@Public()` and carry a
+tighter `@Throttle` than the global default. There is no actor and no `tenantId`, so it must
+never return anything tenant-scoped — `GET /v1/public/pricing` (the landing page and the
+tenant web's plan chooser both read it) is the model: platform-wide data only.
 
 ## Layering (hard rule)
 
@@ -364,6 +388,54 @@ cd bilig_user_web && npm run lint && npm run typecheck && npm run check:i18n \
 
 ---
 
+# Landing site — `bilig-landing/`
+
+The public marketing page for prospective customers, live at `bilig.systems` and
+`www.bilig.systems` (both serve it; canonical is the bare host, `lib/site.ts`). Read
+`bilig-landing/README.md` first. It has **no login and no realm**, and it is the smallest
+app here, so most rules from the other webs simply don't apply:
+
+- **Layout:** flat (no `src/`, `@/` → repo root). `app/` holds the single page plus SEO
+  files (`sitemap.ts`, `robots.ts`, `manifest.ts`, OG image); `components/ui/` are
+  hand-written primitives, `components/layout/` the navbar/footer, `components/sections/`
+  one file per page section. **Not shadcn, not base-ui** — the shadcn skill does not apply.
+- **Copy lives in `data/content.ts`**, typed, Mongolian only, kept out of components so they
+  stay presentational. No i18n framework, no dictionaries — don't add one. `*text*` in copy
+  becomes a brand-coloured `<em>` via `lib/emphasis.tsx`.
+- **Theming:** dark is the default. `data-theme` on `<html>` swaps every token in
+  `app/globals.css` (bridged into Tailwind with `@theme inline`); an inline script in
+  `app/layout.tsx` stamps it before hydration. Bespoke chrome is `.c-*` classes under
+  `@layer components`. Colour classes must be literal strings — go through `lib/colors.ts`,
+  never interpolate `text-${color}`.
+- **Backend calls**, all to `/v1/public/*`:
+  - `app/api/plans/route.ts` — same-origin proxy for `GET /v1/public/pricing` with
+    `cache: "no-store"`; the client `Pricing` section fetches `/api/plans`. There is
+    deliberately **no local price fallback** — an unreachable API shows an error, never
+    invented prices. The wire types are hand-written in `lib/plans.ts`; amounts are
+    strings and only `amount()` there turns one into a number, for display.
+  - `app/api/plan-inquiry/route.ts` — same-origin proxy for
+    `POST /v1/public/tickets/plan-inquiry` (the form under the price table; becomes an
+    admin-web ticket). It keeps its own per-visitor limit and honeypot.
+  - `ContactForm` (the "Ярилцах"/contact section) posts **from the browser** to
+    `${BACKEND_URL}/v1/public/leads` (`leadsEndpoint`), so the API origin is public and the
+    backend's `CORS_ORIGINS` must list the landing origins. Nothing else exposes it.
+- Only `/v1/public/*` may be called from here — never a realm route, never a token.
+- **Env** (`lib/env.ts`, no validation, both optional): `TENANT_URL` — the tenant web
+  origin every CTA hands off to (falls back to `#`; the demo CTA falls back to production);
+  it is a **Docker build arg**, so changing it in production means a rebuild. `BACKEND_URL` —
+  API origin without `/v1`, read at runtime, falls back to production.
+- **Deploy is push-to-`main`**: `.github/workflows/deploy.yml` runs lint + typecheck,
+  builds the standalone `Dockerfile` into GHCR, then rolls it onto the droplet with
+  automatic rollback. Anything merged to `main` is live minutes later.
+
+## Before committing (landing site)
+
+```bash
+cd bilig-landing && npm run lint && npm run typecheck
+```
+
+---
+
 ## Which tool applies to which app
 
 The `.claude/` agents and skills were written for the original two apps. Their
@@ -375,10 +447,11 @@ descriptions name the app they cover — respect that:
 | `lms-erp-tenant/` | `shadcn`, `api-layer`           | `code-auditor`, `security-auditor`, `performance-auditor`            |
 | `lms-erp-admin/`  | `shadcn` (UI parts only)        | none dedicated — review against the Admin web section above          |
 | `bilig_user_web/` | none                            | none dedicated — review against the User web section above           |
+| `bilig-landing/`  | none                            | none dedicated — review against the Landing site section above       |
 
 Do not run the tenant auditors' rules (next-intl, `@/i18n/navigation`, dictionaries) against
-the admin or user web — they would flag correct code. `jse-code-review` is diff-based and
-works in any of the four repos.
+the admin, user or landing web — they would flag correct code. `jse-code-review` is
+diff-based and works in any of the five repos.
 
 ## Cross-cutting
 
@@ -389,6 +462,8 @@ works in any of the four repos.
   - `/v1/admin/*` → `lms-erp-admin/lib/api/<resource>.ts` (+ its `*.test.ts`), `/docs/admin`.
   - `/v1/user/*` or `/v1/auth/user/*` → `cd bilig_user_web && npm run api:types`, fix what
     `typecheck` breaks, then `verify:contract` against a running API. `/docs/user`.
+  - `/v1/public/pricing` → **two** consumers: `bilig-landing/lib/plans.ts` and the tenant
+    web's `subscription/_lib/data-fetching.ts`. `/docs/public`.
 - **Realms are hard walls.** Each web holds tokens for exactly one realm; never call another
   realm's routes from it (a cross-realm token is always a 401 by design).
 - No client checks permissions for real — `PermissionsGuard`, `RealmGuard` and
@@ -396,7 +471,7 @@ works in any of the four repos.
   `proxy.ts` role gate, are conveniences, never the enforcement.
 - Money arrives as **strings** (serialized BigInt). Every client parses them in its
   mapper/schema; never do money math in a `Number`.
-- Four repos, separate commits. State clearly which app each change landed in.
+- Five repos, separate commits. State clearly which app each change landed in.
 - `lms-erp-tenant/constants/routes.ts` is stale — verify routes against `app/`.
 - `NEXT_PUBLIC_API_URL` appears in the tenant web's `.env.example` and README but is read by
   no code; `BACKEND_API_URL` is the real variable.

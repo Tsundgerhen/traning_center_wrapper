@@ -1,6 +1,6 @@
 # training_center — Bilig LMS ERP workspace
 
-One folder, four apps, each in **its own git repo**. This root folder is a small
+One folder, five apps, each in **its own git repo**. This root folder is a small
 wrapper repo that only holds the shared setup — the `Makefile` that runs
 everything, the agent docs (`AGENTS.md`, `CLAUDE.md`) and `.claude/`.
 
@@ -10,6 +10,7 @@ everything, the agent docs (`AGENTS.md`, `CLAUDE.md`) and `.claude/`.
 | `lms-erp-tenant/` | Tenant web — training-center staff    | http://localhost:3000     |
 | `bilig_user_web/` | User web — students & parents         | http://localhost:3001     |
 | `lms-erp-admin/`  | Admin web — Bilig platform staff      | http://localhost:3002     |
+| `bilig-landing/`  | Landing site — public marketing page  | http://localhost:3004     |
 
 Also running in dev: PostgreSQL on **5433** (embedded, no install needed) and
 Prisma Studio on http://localhost:5555.
@@ -34,7 +35,7 @@ make dev        # backend + tenant web  →  open http://localhost:3000
 
 | Tool      | Why                                   | Check            |
 | --------- | ------------------------------------- | ---------------- |
-| Node 24   | all four apps                         | `node -v`        |
+| Node 24   | all five apps                         | `node -v`        |
 | Corepack  | gives the backend its yarn 4          | `corepack enable` (once) |
 | Git Bash  | the Makefile runs in bash             | comes with Git for Windows |
 | GNU make  | runs the `make …` commands            | `make -v`        |
@@ -44,7 +45,7 @@ terminal. You do **not** need to install PostgreSQL.
 
 ### 2. Get the code
 
-Clone this wrapper, then the four apps **inside** it, with exactly these folder
+Clone this wrapper, then the five apps **inside** it, with exactly these folder
 names (you need SSH access to each GitHub repo):
 
 ```bash
@@ -54,12 +55,13 @@ git clone git@github.com:Erdene-Vvl/lms-erp.git
 git clone git@github.com:Artistry449/lms-erp-tenant.git
 git clone git@github.com:Erdene-Vvl/lms-erp-admin.git
 git clone git@github.com:Erdene-Vvl/bilig_user_web.git
+git clone git@github.com:Erdene-Vvl/bilig-landing.git
 ```
 
 ### 3. Install dependencies
 
 ```bash
-make install    # yarn for the backend, npm for the three webs
+make install    # yarn for the backend, npm for the four webs
 ```
 
 ### 4. Create the env files
@@ -74,6 +76,9 @@ cp lms-erp-admin/.env.example   lms-erp-admin/.env
 cp bilig_user_web/.env.example  bilig_user_web/.env
 ```
 
+`bilig-landing/` has no `.env.example` and starts without one — but create
+`bilig-landing/.env.local` with the two values below, or it shows production prices.
+
 Ask a teammate for secrets (JWT secrets, QPay, eBarimt, storage keys). These
 values must line up between the apps for local dev:
 
@@ -86,6 +91,8 @@ values must line up between the apps for local dev:
 | `lms-erp-tenant/.env.local` | `BACKEND_API_URL`  | `http://localhost:3003` (no `/v1`)                          |
 | `lms-erp-admin/.env`     | `BACKEND_API_URL`     | `http://localhost:3003` (no `/v1`)                          |
 | `bilig_user_web/.env`    | `API_BASE_URL`        | `http://localhost:3003/v1` (**with** `/v1`, no trailing `/`) |
+| `bilig-landing/.env.local` | `BACKEND_URL`       | `http://localhost:3003` (no `/v1`) — **unset means production prices** |
+| `bilig-landing/.env.local` | `TENANT_URL`        | `http://localhost:3000` — unset leaves the CTAs as `#`      |
 
 Never commit an `.env` file.
 
@@ -109,7 +116,7 @@ cd lms-erp && yarn db:seed-demo
 
 ```bash
 make dev        # backend + tenant web
-make dev-all    # backend + all three webs
+make dev-all    # backend + all four webs
 ```
 
 | Open                          | Log in with                                   |
@@ -117,6 +124,7 @@ make dev-all    # backend + all three webs
 | http://localhost:3000 tenant  | a staff account printed by the seed            |
 | http://localhost:3002 admin   | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` |
 | http://localhost:3001 user    | a student or parent account printed by the seed |
+| http://localhost:3004 landing | no login — public page, pricing from the API  |
 | http://localhost:3003/docs/company · `/docs/admin` · `/docs/user` | Swagger, per surface |
 
 ---
@@ -126,15 +134,15 @@ make dev-all    # backend + all three webs
 | Command                       | What it does                                             |
 | ----------------------------- | -------------------------------------------------------- |
 | `make dev`                    | backend + tenant web (the usual day)                     |
-| `make dev-all`                | backend + tenant + admin + user webs                     |
+| `make dev-all`                | backend + tenant + admin + user + landing webs           |
 | `make backend`                | db + Prisma Studio + API only                            |
-| `make tenant` / `admin` / `user` | one web app on its own (needs the backend running)    |
+| `make tenant` / `admin` / `user` / `landing` | one web app on its own (needs the backend running) |
 | `make stop`                   | free every dev port (postgres keeps running)             |
 | `make db-stop`                | stop postgres                                            |
 | `make db-deploy`              | apply new migrations after a `git pull` + regenerate     |
 | `make db-migrate NAME=add_x`  | create a migration after editing the schema              |
 | `make db-reset`               | wipe the database and re-seed                            |
-| `make install` / `lint` / `build` | across all four apps                                 |
+| `make install` / `lint` / `build` | across all five apps                                 |
 
 `make dev API_START=start:dev` runs the API in watch mode (restarts on save).
 
@@ -144,12 +152,13 @@ make dev-all    # backend + all three webs
 
 | Symptom                                           | Fix                                                        |
 | ------------------------------------------------- | ---------------------------------------------------------- |
-| `port 3000 is already in use` (or 3001–3003, 5555)| `make stop`, then start again                              |
+| `port 3000 is already in use` (or 3001–3004, 5555)| `make stop`, then start again                              |
 | postgres hangs or won't start                     | `make db-stop`, then retry; last resort `make db-nuke`     |
 | API won't boot, complains about an env variable   | a value is missing in `lms-erp/.env` — compare with `.env.example` |
 | errors about missing tables/columns after a pull  | `make db-deploy`                                           |
 | seed fails with `Cannot read properties of undefined` | `make db-generate`, then `make db-seed`                |
 | web shows "fetch failed" / 502                    | the API isn't running, or `BACKEND_API_URL` / `API_BASE_URL` is wrong |
+| landing shows production prices, not the seed's    | set `BACKEND_URL=http://localhost:3003` in `bilig-landing/.env.local` |
 | `yarn` says it is version 1.x in `lms-erp/`       | run `corepack enable` and open a new terminal              |
 
 `make db-nuke` deletes the local database files entirely — only use it when
@@ -168,7 +177,7 @@ make dev-all    # backend + all three webs
 
 ## More docs
 
-- `AGENTS.md` — architecture and rules for all four apps (start here before coding).
+- `AGENTS.md` — architecture and rules for all five apps (start here before coding).
 - `lms-erp/README.md` — backend: surfaces, auth, billing, chat, storage.
-- `lms-erp-tenant/AGENTS.md`, `lms-erp-admin/AGENTS.md`, `bilig_user_web/README.md` — per-app rules.
+- `lms-erp-tenant/AGENTS.md`, `lms-erp-admin/AGENTS.md`, `bilig_user_web/README.md`, `bilig-landing/README.md` — per-app rules.
 - Email templates: `lms-erp/src/core/notifications/templates/README.md`.
